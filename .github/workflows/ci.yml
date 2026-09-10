@@ -1,0 +1,68 @@
+name: CI
+
+# Run on every push to main and on every pull request targeting it.
+# The PR trigger is the important one: it means a broken branch is caught
+# before it's merged, not after it's deployed.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# If you push twice quickly, cancel the older run. Saves CI minutes and
+# stops you waiting on results for a commit you've already replaced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: "Backend: pytest"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Verify the Vercel entrypoint imports
+        # Catches the single most likely deploy break: the shim in
+        # api/index.py failing to import the app. Cheap insurance -- this
+        # exact failure is invisible until the deploy is already live.
+        run: python -c "from api.index import app; assert app.title == 'PhishGuard API'"
+
+  frontend:
+    name: "Frontend: typecheck + build"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        # `npm ci` not `npm install`: it installs exactly what the
+        # lockfile says and fails if package.json and the lock disagree.
+        # Reproducible builds are the whole point of a lockfile.
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build

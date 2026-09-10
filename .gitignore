@@ -1,0 +1,12 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.env
+.env.local
+.vercel
+
+# TypeScript incremental build cache
+*.tsbuildinfo

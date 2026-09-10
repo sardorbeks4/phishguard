@@ -1,0 +1,8 @@
+# Production dependencies only.
+#
+# Vercel installs this file into the serverless function bundle, and bundle
+# size is cold-start time. uvicorn is NOT here: it's the local development
+# server, and Vercel supplies its own ASGI host. Shipping it would add
+# weight to every cold start for no benefit.
+fastapi==0.115.6
+pydantic==2.10.4
