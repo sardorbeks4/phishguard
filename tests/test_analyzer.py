@@ -64,6 +64,16 @@ def test_levenshtein_caps_early():
     ("paypa1.com", "paypal.com"),
     ("paypal-secure.com", "paypal.com"),
     ("secure-netflix-billing.net", "netflix.com"),
+    # Regression: combines character substitution AND brand-gluing. Each
+    # trick alone was caught; together they fell through both checks and
+    # the sending domain went unflagged entirely.
+    ("paypa1-secure.info", "paypal.com"),
+    ("rnicrosoft-login.net", "microsoft.com"),
+    # Short brand names, which only became matchable once a lure word was
+    # required alongside them. Delivery and tax scams live here.
+    ("ups-delivery-notice.com", "ups.com"),
+    ("irs-refund-verify.com", "irs.gov"),
+    ("zoom-security-alert.net", "zoom.com"),
 ])
 def test_lookalike_detected(domain, impersonates):
     match = lookalike_of(domain)
@@ -78,6 +88,13 @@ def test_lookalike_detected(domain, impersonates):
     "morningbrew.com",
     "stackoverflow.com",
     "ups.com",           # short name that must not match 'usps.com'
+    # Brand names that are also ordinary English words. Without the
+    # lure-word requirement these were accused of impersonation.
+    "my-target-notes.com",
+    "chase-the-sun.org",
+    "apple-orchard-farm.com",
+    "group-chat-online.com",   # lure word, but no brand
+    "id-card-service.org",     # two lure words, still no brand
 ])
 def test_lookalike_not_triggered_on_real_domains(domain):
     assert lookalike_of(domain) is None, f"{domain} was wrongly flagged"

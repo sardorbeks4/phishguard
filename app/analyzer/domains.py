@@ -89,6 +89,18 @@ BRAND_DOMAINS: dict[str, set[str]] = {
 # Flat set of every legitimate brand domain, used for typosquat comparison.
 KNOWN_GOOD_DOMAINS: set[str] = {d for domains in BRAND_DOMAINS.values() for d in domains}
 
+# The same domains, sorted, for ITERATION.
+#
+# Iterating the set directly made lookalike_of non-deterministic: Python
+# randomises string hashing per process, so a brand with more than one
+# legitimate domain (zoom.us / zoom.com) reported whichever the set
+# happened to yield first. The user-visible text "imitates zoom.us" could
+# flip to "imitates zoom.com" between two serverless cold starts, and a
+# test asserting either one passed or failed depending on the hash seed.
+#
+# Rule worth keeping: never iterate a set when the order affects output.
+KNOWN_GOOD_SORTED: list[str] = sorted(KNOWN_GOOD_DOMAINS)
+
 
 def registrable_domain(host: str) -> str:
     """Return the eTLD+1 for a hostname.
@@ -139,6 +151,22 @@ _CONFUSABLES = {
     "$": "s", "@": "a", "!": "i", "|": "l",
 }
 _CONFUSABLE_PAIRS = [("rn", "m"), ("vv", "w"), ("cl", "d"), ("nn", "m")]
+
+# Words attackers glue onto a brand to make a domain sound official.
+#
+# These exist to make the brand-in-hostname check precise. Several brand
+# names are also ordinary English words -- target, chase, apple, zoom, slack
+# -- so matching a bare token accused 'my-target-notes.com' of impersonating
+# a retailer. Requiring a lure word alongside the brand keeps
+# 'apple-support.com' flagged while letting innocent word-collisions pass.
+LURE_WORDS = {
+    "secure", "security", "login", "signin", "verify", "verification",
+    "account", "accounts", "billing", "payment", "payments", "support",
+    "service", "services", "helpdesk", "alert", "alerts", "update",
+    "updates", "confirm", "confirmation", "auth", "authentication",
+    "recovery", "recover", "unlock", "validate", "notice", "notify",
+    "center", "centre", "portal", "access", "id", "mail", "online",
+}
 
 
 def skeleton(domain: str) -> str:
@@ -196,7 +224,7 @@ def lookalike_of(domain: str) -> tuple[str, str] | None:
     target_skeleton = skeleton(domain)
     domain_name = domain.rsplit(".", 1)[0]
 
-    for good in KNOWN_GOOD_DOMAINS:
+    for good in KNOWN_GOOD_SORTED:
         good_name = good.rsplit(".", 1)[0]
 
         # 1. Visual confusables: paypa1.com vs paypal.com
@@ -212,7 +240,26 @@ def lookalike_of(domain: str) -> tuple[str, str] | None:
         # 3. Brand embedded with a separator: 'paypal-secure.com',
         #    'secure-paypal-login.net'. The brand is in the name but the
         #    domain isn't theirs.
-        if len(good_name) >= 5 and good_name in re.split(r"[-_.]", domain_name):
-            return good, "brand_in_hostname"
+        #
+        # Tokens are compared by SKELETON, not literally. That matters for
+        # domains combining both tricks at once -- 'paypa1-secure.info'
+        # glues the brand on AND swaps a character inside it. Check 1 misses
+        # it because the skeleton drags along the extra "secure"; a literal
+        # version of this check missed it because "paypa1" != "paypal". Real
+        # attackers stack techniques, so the checks have to compose too.
+        # A lure word must appear alongside the brand, or we'd accuse every
+        # domain that happens to contain an ordinary English word that is
+        # also a brand name.
+        # The length guard is only 3 here, where it is 6 for the typo check
+        # above. It can be this loose precisely because a lure word is also
+        # required -- and short brands are exactly the ones that matter most
+        # for delivery and tax scams (ups, dhl, irs).
+        if len(good_name) >= 3:
+            good_skeleton = skeleton(good)
+            tokens = [t for t in re.split(r"[-_.]", domain_name) if t]
+            brand_hit = any(skeleton(t) == good_skeleton for t in tokens)
+            lure_hit = any(t.lower() in LURE_WORDS for t in tokens)
+            if brand_hit and lure_hit:
+                return good, "brand_in_hostname"
 
     return None
